@@ -499,6 +499,21 @@
   .demo-input .btn{padding:9px 14px}
   .demo-chips{max-height:36vh;overflow-y:auto;padding-top:12px;border-top:1px solid var(--line)}
   .demo-chips button:disabled{opacity:.4;cursor:default;border-color:var(--line)}
+  .demo-box{width:min(720px,100%)}
+  .demo-panel{border-top:1px solid var(--line);background:rgba(255,255,255,0.02)}
+  .demo-tabs{display:flex;gap:8px;padding:14px 18px 0;overflow-x:auto;scrollbar-width:none}
+  .demo-tabs::-webkit-scrollbar{display:none}
+  .demo-tab{flex-shrink:0;border:1px solid var(--line);background:none;color:var(--text-dim);font-family:'IBM Plex Sans',sans-serif;font-size:13px;font-weight:500;padding:7px 14px;border-radius:99px;cursor:pointer;transition:color 150ms ease,border-color 150ms ease,background 150ms ease}
+  .demo-tab:hover{color:var(--text)}
+  .demo-tab[aria-selected="true"]{background:var(--accent-soft);color:var(--accent);border-color:var(--accent)}
+  .demo-qs{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:14px 18px 18px;max-height:34vh;overflow-y:auto}
+  .demo-q{display:flex;align-items:center;gap:12px;text-align:left;border:1px solid var(--line);background:var(--surface);color:var(--text);border-radius:10px;padding:13px 14px;font-family:'IBM Plex Sans',sans-serif;font-size:14px;line-height:1.4;cursor:pointer;transition:border-color 150ms ease,background 150ms ease,transform 150ms ease}
+  .demo-q:hover,.demo-q:focus-visible{border-color:var(--accent);background:#242732}
+  .demo-q:active{transform:scale(.985)}
+  .demo-q .qn{flex-shrink:0;width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font-family:'Chakra Petch','Space Grotesk',sans-serif;font-size:12px;font-weight:600;color:var(--accent);border:1px solid var(--accent-soft)}
+  .demo-q.asked .qn{background:var(--accent);color:#191008;border-color:var(--accent)}
+  .demo-qs.busy .demo-q{opacity:.5;pointer-events:none}
+  @media (max-width:640px){.demo-qs{grid-template-columns:1fr;padding:12px 14px 16px;max-height:38vh}.demo-tabs{padding:12px 14px 0}}
   .emblem{
     width:110px;height:110px;border-radius:16px;flex-shrink:0;display:flex;align-items:center;justify-content:center;
     font-family:'Chakra Petch','Space Grotesk',sans-serif;font-size:46px;font-weight:700;color:#fff;
@@ -820,7 +835,10 @@
       <button type="button" class="btn btn-ghost" id="demo-close">Kapat</button>
     </div>
     <div class="demo-log" id="demo-log" aria-live="polite"></div>
-    <div class="demo-chips" id="demo-chips"></div>
+    <div class="demo-panel">
+      <div class="demo-tabs" id="demo-tabs" role="tablist"></div>
+      <div class="demo-qs" id="demo-chips"></div>
+    </div>
     <div class="demo-input" id="demo-input" hidden>
       <input id="demo-text" type="text" maxlength="300" placeholder="Jarvis'e bir şey sor…" autocomplete="off">
       <button type="button" class="btn btn-primary" id="demo-send">Gönder</button>
@@ -1339,13 +1357,14 @@
   /*ENDQA*/
   // Canli sohbet icin Cloudflare Worker adresi (jarvis-demo-proxy/KURULUM.md). Bos birakirsan sadece hazir sorular gorunur.
   // Gemini API anahtari ASLA buraya yazilmaz; anahtar sadece Worker'daki Secret alaninda durur.
-  var DEMO_API = 'https://jarvis.ardaoktem3.workers.dev/';
+  var DEMO_API = '';
   var demoBtn = document.getElementById('jarvis-demo-btn');
   var demoModal = document.getElementById('jarvis-demo');
   if(demoBtn && demoModal){
     var dLog = document.getElementById('demo-log');
     var dOrb = document.getElementById('demo-orb');
     var dChips = document.getElementById('demo-chips');
+    var dTabs = document.getElementById('demo-tabs');
     var dMode = document.getElementById('demo-mode');
     var dBox = document.getElementById('demo-input');
     var dText = document.getElementById('demo-text');
@@ -1354,9 +1373,21 @@
     var hist = [];
     var reduceMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
-    if(DEMO_API){
-      dBox.hidden = false;
-      dMode.textContent = "Canlı sohbet";
+    // Canli sohbet kutusu sadece Worker'a gercekten ulasilabiliyorsa gorunur (sirket/okul aglari workers.dev'i engelleyebilir).
+    // Ulasilamazsa hata gosterilmez, sadece hazir sorular kalir.
+    var probed = false;
+    function probe(){
+      if(!DEMO_API || probed) return;
+      probed = true;
+      var ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+      var tmo = setTimeout(function(){ if(ctl) ctl.abort(); }, 4000);
+      fetch(DEMO_API, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({messages:[]}), signal: ctl ? ctl.signal : undefined})
+        .then(function(){
+          clearTimeout(tmo);
+          dBox.hidden = false;
+          dMode.textContent = "Canlı sohbet · Gemini, Jarvis'e odaklı · mesajların Google'a gider";
+        })
+        .catch(function(){ clearTimeout(tmo); });
     }
     function addMsg(role, t){
       var d = document.createElement('div');
@@ -1369,6 +1400,7 @@
     function setOrb(state){ dOrb.className = 'orb orb-sm' + (state ? ' ' + state : ''); }
     function lock(on){
       busy = on;
+      dChips.className = 'demo-qs' + (on ? ' busy' : '');
       if(dText){ dText.disabled = on; dSend.disabled = on; }
     }
     function reveal(out, text, done){
@@ -1384,11 +1416,14 @@
         if(k >= text.length){ clearInterval(timer); finish(); }
       }, 16);
     }
-    function ask(i, btn){
+    var askedSet = {};
+    function ask(i, btn, num){
       if(busy) return;
       var item = QA[i];
       lock(true);
-      btn.disabled = true;
+      askedSet[i] = true;
+      btn.classList.add('asked');
+      num.textContent = '✓';
       addMsg('me', item.q);
       setOrb('thinking');
       var out = addMsg('bot', '…');
@@ -1430,19 +1465,47 @@
           lock(false);
         });
     }
-    QA.forEach(function(item, i){
-      var b = document.createElement('button');
-      b.type = 'button';
-      b.textContent = item.q;
-      b.addEventListener('click', function(){ ask(i, b); });
-      dChips.appendChild(b);
+    var CATS = [
+      {n:'Başlangıç', ids:[0, 1, 2, 14, 15, 16]},
+      {n:'Yetenekler', ids:[3, 4, 5, 10]},
+      {n:'Yapay zeka', ids:[6, 7, 8, 9]},
+      {n:'Güvenlik ve sınırlar', ids:[11, 12, 13]}
+    ];
+    function showCat(k){
+      Array.prototype.forEach.call(dTabs.children, function(t, j){ t.setAttribute('aria-selected', j === k ? 'true' : 'false'); });
+      dChips.textContent = '';
+      CATS[k].ids.forEach(function(id, n){
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'demo-q' + (askedSet[id] ? ' asked' : '');
+        var num = document.createElement('span');
+        num.className = 'qn';
+        num.textContent = askedSet[id] ? '✓' : String(n + 1);
+        var tx = document.createElement('span');
+        tx.textContent = QA[id].q;
+        b.appendChild(num);
+        b.appendChild(tx);
+        b.addEventListener('click', function(){ ask(id, b, num); });
+        dChips.appendChild(b);
+      });
+    }
+    CATS.forEach(function(c, k){
+      var t = document.createElement('button');
+      t.type = 'button';
+      t.className = 'demo-tab';
+      t.setAttribute('role', 'tab');
+      t.textContent = c.n;
+      t.addEventListener('click', function(){ showCat(k); });
+      dTabs.appendChild(t);
     });
+    showCat(0);
     if(dSend){
       dSend.addEventListener('click', sendFree);
       dText.addEventListener('keydown', function(e){ if(e.key === 'Enter'){ e.preventDefault(); sendFree(); } });
     }
     function openDemo(){
       demoModal.hidden = false;
+      probe();
       if(!dLog.children.length){
         addMsg('bot', DEMO_API
           ? "Merhaba, ben JARVIS. Bana istediğini sorabilirsin ya da aşağıdaki hazır sorulardan birini seçebilirsin."
